@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Mouse Engine Game</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        canvas {
+            display: block;
+            background: #eef;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="myCanvas"></canvas>
+    <script src="mouse-engine.js"></script>
+    <script>
+        // キャンバス初期化
+        window.onload = () => {
+            Mouse.init('myCanvas', 800, 600);
+
+            Mouse.loadImage('player', 'https://mouse-img.netlify.app/imgs/mouse-one.png');
+            // プレイヤーと地面
+            const player = Mouse.createRigidBody(100, 100, 32, 32, "player");
+            const ground = Mouse.createRigidBody(100, 550, 1600, 500, 0, 0, null, false, true); // 横長い床
+
+            // カメラ初期位置
+            let cameraX = 0;
+
+            // UIボタン作成関数
+            function createButton(x, y, width, height, label, onClick) {
+                return {
+                    x, y, width, height,
+                    label,
+                    onClick,
+                    draw(ctx) {
+                        ctx.fillStyle = 'orange';
+                        ctx.fillRect(this.x, this.y, this.width, this.height);
+                        ctx.fillStyle = 'black';
+                        ctx.font = '16px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(this.label, this.x + this.width / 2, this.y + this.height / 2);
+                    }
+                };
+            }
+
+            // ジャンプ
+            const jumpBtn = createButton(650, 500, 120, 50, 'ジャンプ', () => {
+                if (player.onGround) {
+                    player.vy = -12;
+                    player.onGround = false;
+                }
+            });
+
+            // 左右移動
+            const leftBtn = createButton(20, 500, 50, 50, '←', () => player.vx = -3);
+            const rightBtn = createButton(80, 500, 50, 50, '→', () => player.vx = 3);
+
+            // UI登録
+            Mouse.addUIElement(jumpBtn);
+            Mouse.addUIElement(leftBtn);
+            Mouse.addUIElement(rightBtn);
+            Mouse.setupUIEvents();
+
+            // ゲームループ
+            Mouse.loop(() => {
+                // カメラ追従（中央に固定）
+                cameraX = player.x - Mouse.width / 2 + player.width / 2;
+
+                Mouse.clear();
+
+                // カメラ座標の影響をキャンバスに与える
+                Mouse.ctx.save();
+                Mouse.ctx.translate(-cameraX, 0);
+
+                // オブジェクト描画
+                Mouse.drawRigidBody(ground, 'green');
+                Mouse.drawRigidBody(player, 'blue');
+
+                Mouse.ctx.restore();
+
+                // UI描画（カメラ無関係）
+                Mouse.drawUI();
+
+                // キー入力で速度調整（キー離したら停止）
+                if (!Mouse.isKeyPressed('ArrowLeft') && !Mouse.isKeyPressed('ArrowRight')) {
+                    player.vx = 0;
+                }
+                if (Mouse.isKeyPressed('ArrowLeft')) player.vx = -3;
+                if (Mouse.isKeyPressed('ArrowRight')) player.vx = 3;
+            });
+        };
+
+    </script>
+</body>
+
+</html>

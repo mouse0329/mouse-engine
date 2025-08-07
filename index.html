@@ -2,102 +2,117 @@
 <html lang="ja">
 
 <head>
-    <meta charset="UTF-8">
-    <title>Mouse Engine Game</title>
+    <meta charset="UTF-8" />
+    <title>ネズミ2Dスクロールチュー</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            touch-action: none;
+            background: #88d;
         }
 
         canvas {
             display: block;
-            background: #eef;
+            background: #cce;
         }
     </style>
 </head>
 
 <body>
-    <canvas id="myCanvas"></canvas>
+    <canvas id="gameCanvas"></canvas>
     <script src="mouse-engine.js"></script>
     <script>
-        // キャンバス初期化
-        window.onload = () => {
-            Mouse.init('myCanvas', 800, 600);
+        Mouse.init("gameCanvas", window.innerWidth, window.innerHeight);
+        Mouse.setupUIEvents();
 
-            Mouse.loadImage('player', 'https://mouse-img.netlify.app/imgs/mouse-one.png');
-            // プレイヤーと地面
-            const player = Mouse.createRigidBody(100, 100, 32, 32, "player");
-            const ground = Mouse.createRigidBody(100, 550, 1600, 500, 0, 0, null, false, true); // 横長い床
+        // プレイヤー作成チュー
+        const player = Mouse.createRigidBody(100, 100, 40, 40, 0, 0, null, false, false);
+        player.color = "#f55";
+        Mouse.followCamera(player);
 
-            // カメラ初期位置
-            let cameraX = 0;
+        // 床作成チュー
+        for (let i = 0; i < 20; i++) {
+            Mouse.createRigidBody(i * 200, 500, 200, 50, 0, 0, null, false, true);
+        }
 
-            // UIボタン作成関数
-            function createButton(x, y, width, height, label, onClick) {
-                return {
-                    x, y, width, height,
-                    label,
-                    onClick,
-                    draw(ctx) {
-                        ctx.fillStyle = 'orange';
-                        ctx.fillRect(this.x, this.y, this.width, this.height);
-                        ctx.fillStyle = 'black';
-                        ctx.font = '16px sans-serif';
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(this.label, this.x + this.width / 2, this.y + this.height / 2);
-                    }
-                };
-            }
+        // 仮想パッドボタンチュー
+        const leftBtn = {
+            x: 50, y: Mouse.height - 120, width: 60, height: 60,
+            draw(ctx) {
+                ctx.fillStyle = "#444";
+                ctx.beginPath();
+                ctx.arc(this.x + 30, this.y + 30, 30, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#fff";
+                ctx.font = "30px sans-serif";
+                ctx.fillText("←", this.x + 15, this.y + 40);
+            },
+            onClick() { movingLeft = true; },
+            onRelease() { movingLeft = false; }
+        };
 
-            // ジャンプ
-            const jumpBtn = createButton(650, 500, 120, 50, 'ジャンプ', () => {
+        const rightBtn = {
+            x: 140, y: Mouse.height - 120, width: 60, height: 60,
+            draw(ctx) {
+                ctx.fillStyle = "#444";
+                ctx.beginPath();
+                ctx.arc(this.x + 30, this.y + 30, 30, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#fff";
+                ctx.font = "30px sans-serif";
+                ctx.fillText("→", this.x + 15, this.y + 40);
+            },
+            onClick() { movingRight = true; },
+            onRelease() { movingRight = false; }
+        };
+
+        const jumpBtn = {
+            x: Mouse.width - 100, y: Mouse.height - 120, width: 60, height: 60,
+            draw(ctx) {
+                ctx.fillStyle = "#444";
+                ctx.beginPath();
+                ctx.arc(this.x + 30, this.y + 30, 30, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#fff";
+                ctx.font = "20px sans-serif";
+                ctx.fillText("Jump", this.x + 5, this.y + 40);
+            },
+            onClick() {
                 if (player.onGround) {
                     player.vy = -12;
-                    player.onGround = false;
                 }
-            });
-
-            // 左右移動
-            const leftBtn = createButton(20, 500, 50, 50, '←', () => player.vx = -3);
-            const rightBtn = createButton(80, 500, 50, 50, '→', () => player.vx = 3);
-
-            // UI登録
-            Mouse.addUIElement(jumpBtn);
-            Mouse.addUIElement(leftBtn);
-            Mouse.addUIElement(rightBtn);
-            Mouse.setupUIEvents();
-
-            // ゲームループ
-            Mouse.loop(() => {
-                // カメラ追従（中央に固定）
-                cameraX = player.x - Mouse.width / 2 + player.width / 2;
-
-                Mouse.clear();
-
-                // カメラ座標の影響をキャンバスに与える
-                Mouse.ctx.save();
-                Mouse.ctx.translate(-cameraX, 0);
-
-                // オブジェクト描画
-                Mouse.drawRigidBody(ground, 'green');
-                Mouse.drawRigidBody(player, 'blue');
-
-                Mouse.ctx.restore();
-
-                // UI描画（カメラ無関係）
-                Mouse.drawUI();
-
-                // キー入力で速度調整（キー離したら停止）
-                if (!Mouse.isKeyPressed('ArrowLeft') && !Mouse.isKeyPressed('ArrowRight')) {
-                    player.vx = 0;
-                }
-                if (Mouse.isKeyPressed('ArrowLeft')) player.vx = -3;
-                if (Mouse.isKeyPressed('ArrowRight')) player.vx = 3;
-            });
+            }
         };
+
+        Mouse.addUIElement(leftBtn);
+        Mouse.addUIElement(rightBtn);
+        Mouse.addUIElement(jumpBtn);
+
+        let movingLeft = false;
+        let movingRight = false;
+
+        Mouse.loop(() => {
+            // 入力処理チュー
+            if (Mouse.isKeyPressed("ArrowLeft") || movingLeft) {
+                player.vx = -5;
+            } else if (Mouse.isKeyPressed("ArrowRight") || movingRight) {
+                player.vx = 5;
+            } else {
+                player.vx = 0;
+            }
+
+            if ((Mouse.isKeyPressed(" ") || Mouse.isKeyPressed("ArrowUp")) && player.onGround) {
+                player.vy = -12;
+            }
+
+            // 描画チュー
+            Mouse.clear();
+            for (let body of Mouse.rigidBodies) {
+                Mouse.drawRigidBody(body, body.color || "blue");
+            }
+
+            Mouse.drawUI();
+        });
 
     </script>
 </body>

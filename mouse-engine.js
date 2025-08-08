@@ -110,6 +110,16 @@ const Mouse = {
             body.vy += gravity;
             body.x += body.vx;
             body.y += body.vy;
+
+            // --- 角度物理演算 ---
+            if (body.enableAnglePhysics) {
+                body.angularVelocity += body.angularAcceleration;
+                body.angle += body.angularVelocity;
+                body.angularVelocity *= 0.98; // 減衰
+                if (Math.abs(body.angularVelocity) < 0.001) body.angularVelocity = 0;
+                body.angularAcceleration = 0;
+            }
+
             body.onGround = false;
 
             // 静的剛体との衝突のみ判定
@@ -128,12 +138,12 @@ const Mouse = {
                         // --- SAT/AABB判定（既存と同じ） ---
                         if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
                             floor.collisionType === "polygon" && floor.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
                             const polyB = [
                                 { x: floor.x, y: floor.y },
                                 { x: floor.x + floor.width, y: floor.y },
@@ -149,7 +159,7 @@ const Mouse = {
                                 { x: body.x + body.width, y: body.y + body.height },
                                 { x: body.x, y: body.y + body.height }
                             ];
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else {
@@ -192,12 +202,12 @@ const Mouse = {
                         // --- SAT判定とMTV計算 ---
                         if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
                             floor.collisionType === "polygon" && floor.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
                             const polyB = [
                                 { x: floor.x, y: floor.y },
                                 { x: floor.x + floor.width, y: floor.y },
@@ -213,7 +223,7 @@ const Mouse = {
                                 { x: body.x + body.width, y: body.y + body.height },
                                 { x: body.x, y: body.y + body.height }
                             ];
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else {
@@ -284,6 +294,15 @@ const Mouse = {
                         // MTV方向に十分なオフセットで再貫通防止
                         body.x += minMTV.x * 0.1;
                         body.y += minMTV.y * 0.1;
+
+                        // --- ここで角加速度を加える（坂で回転するため） ---
+                        if (body.enableAnglePhysics) {
+                            // MTVのx成分が大きいほど回転しやすい（簡易モデル）
+                            // 右上がり坂で右からぶつかると正、左からぶつかると負
+                            // 係数は調整可
+                            const torque = minMTV.x * 0.02; // 0.02は回転しやすさ係数
+                            body.angularAcceleration += torque / (body.inertia || 1);
+                        }
                     }
                 } else {
                     break;
@@ -307,12 +326,12 @@ const Mouse = {
                         // --- SAT/AABB判定（既存と同じ） ---
                         if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
                             floor.collisionType === "polygon" && floor.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
                             const polyB = [
                                 { x: floor.x, y: floor.y },
                                 { x: floor.x + floor.width, y: floor.y },
@@ -328,7 +347,7 @@ const Mouse = {
                                 { x: body.x + body.width, y: body.y + body.height },
                                 { x: body.x, y: body.y + body.height }
                             ];
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else {
@@ -371,12 +390,12 @@ const Mouse = {
                         // --- SAT判定とMTV計算 ---
                         if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
                             floor.collisionType === "polygon" && floor.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
-                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyA = this.getWorldVertices(body);
                             const polyB = [
                                 { x: floor.x, y: floor.y },
                                 { x: floor.x + floor.width, y: floor.y },
@@ -392,7 +411,7 @@ const Mouse = {
                                 { x: body.x + body.width, y: body.y + body.height },
                                 { x: body.x, y: body.y + body.height }
                             ];
-                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            const polyB = this.getWorldVertices(floor);
                             mtv = polygonsMTV(polyA, polyB);
                             hit = !!mtv;
                         } else {
@@ -478,6 +497,16 @@ const Mouse = {
             if (body.onGround) {
                 body.vx *= 0.8;
                 if (Math.abs(body.vx) < 0.05) body.vx = 0;
+
+                // --- 転がり摩擦: 角速度→vx, vx→角加速度 ---
+                if (body.enableAnglePhysics) {
+                    // 円剛体の場合は半径を使う
+                    let r = body.collisionType === "circle" && body.radius ? body.radius : (body.width * 0.5);
+                    // 角速度に応じてvxを加算（転がる動作）
+                    body.vx += body.angularVelocity * r;
+                    // vxに応じて角加速度を加算（摩擦で回転）
+                    body.angularAcceleration += -body.vx / r;
+                }
             }
         }
 
@@ -538,10 +567,79 @@ const Mouse = {
             }
             return { x: x / poly.length, y: y / poly.length };
         }
+
+        // --- 円と矩形のMTV ---
+        function circleRectMTV(circle, rect) {
+            // circle: {x, y, radius}, rect: {x, y, width, height}
+            const cx = circle.x + circle.radius;
+            const cy = circle.y + circle.radius;
+            const rx = rect.x, ry = rect.y, rw = rect.width, rh = rect.height;
+            const closestX = Math.max(rx, Math.min(cx, rx + rw));
+            const closestY = Math.max(ry, Math.min(cy, ry + rh));
+            const dx = cx - closestX;
+            const dy = cy - closestY;
+            const dist = Math.hypot(dx, dy);
+            if (dist < circle.radius) {
+                const overlap = circle.radius - dist;
+                if (dist === 0) return { x: 0, y: -overlap }; // 上に押し出す
+                return { x: dx / dist * overlap, y: dy / dist * overlap };
+            }
+            return null;
+        }
+
+        // --- 円と多角形のMTV ---
+        function circlePolygonMTV(circle, poly) {
+            // circle: {x, y, radius}, poly: [{x, y}, ...]
+            const cx = circle.x + circle.radius;
+            const cy = circle.y + circle.radius;
+            let minOverlap = Infinity;
+            let mtv = null;
+            // 各辺ごとに最近点を求める
+            for (let i = 0; i < poly.length; i++) {
+                const a = poly[i];
+                const b = poly[(i + 1) % poly.length];
+                // 線分ab上の最近点
+                const abx = b.x - a.x, aby = b.y - a.y;
+                const t = Math.max(0, Math.min(1, ((cx - a.x) * abx + (cy - a.y) * aby) / (abx * abx + aby * aby)));
+                const px = a.x + t * abx, py = a.y + t * aby;
+                const dx = cx - px, dy = cy - py;
+                const dist = Math.hypot(dx, dy);
+                if (dist < circle.radius) {
+                    const overlap = circle.radius - dist;
+                    if (overlap < minOverlap) {
+                        minOverlap = overlap;
+                        if (dist === 0) {
+                            mtv = { x: 0, y: -overlap };
+                        } else {
+                            mtv = { x: dx / dist * overlap, y: dy / dist * overlap };
+                        }
+                    }
+                }
+            }
+            // 円中心が多角形内なら最大MTVで外に出す
+            let inside = true;
+            for (let i = 0; i < poly.length; i++) {
+                const a = poly[i], b = poly[(i + 1) % poly.length];
+                if ((b.x - a.x) * (cy - a.y) - (b.y - a.y) * (cx - a.x) < 0) {
+                    inside = false;
+                    break;
+                }
+            }
+            if (inside) {
+                // 多角形の中心方向に押し出す
+                const center = getCenter(poly);
+                const dx = cx - center.x, dy = cy - center.y;
+                const dist = Math.hypot(dx, dy);
+                const overlap = circle.radius;
+                mtv = { x: dx / dist * overlap, y: dy / dist * overlap };
+            }
+            return mtv;
+        }
     },
 
-    createRigidBody(x, y, width, height, vx = 0, vy = 0, imageName = null, useVertices = false, isStatic = false) {
+    createRigidBody(x, y, width, height, vx = 0, vy = 0, imageName = null, useVertices = false, isStatic = false, options = {}) {
         let vertices = [];
+        let radius = options.radius !== undefined ? options.radius : Math.min(width, height) / 2;
 
         if (useVertices) {
             vertices = [
@@ -559,89 +657,231 @@ const Mouse = {
             imageName,
             isStatic,
             onGround: false,
-            collisionType: useVertices ? "polygon" : "rect" // ← 追加
+            collisionType: options.collisionType || (options.radius ? "circle" : (useVertices ? "polygon" : "rect")),
+            // 角度物理演算用プロパティ
+            angle: options.angle !== undefined ? options.angle : 0,
+            angularVelocity: options.angularVelocity !== undefined ? options.angularVelocity : 0,
+            angularAcceleration: options.angularAcceleration !== undefined ? options.angularAcceleration : 0,
+            inertia: options.inertia !== undefined ? options.inertia : (width * height * 0.1),
+            enableAnglePhysics: !!options.enableAnglePhysics,
+            radius: options.collisionType === "circle" || options.radius ? radius : undefined
         };
 
         this.rigidBodies.push(body);
         return body;
     },
 
+    // --- 頂点をワールド座標に回転して返す ---
+    getWorldVertices(body) {
+        if (!body.vertices || body.vertices.length === 0) return [];
+        const angle = body.angle || 0;
+        const cx = body.width / 2;
+        const cy = body.height / 2;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        return body.vertices.map(v => ({
+            x: body.x + cx + (v.x - cx) * cos - (v.y - cy) * sin,
+            y: body.y + cy + (v.x - cx) * sin + (v.y - cy) * cos
+        }));
+    },
+
     drawRigidBody(body, color = 'blue') {
-        // デバッグモードでなければ頂点描画や輪郭描画を省略
         const ctx = this.ctx;
-        if (body.collisionType === "polygon" && body.vertices && body.vertices.length >= 3) {
+        // --- 円形描画対応 ---
+        if (body.collisionType === "circle" && body.radius) {
             ctx.save();
             ctx.beginPath();
-            const first = body.vertices[0];
-            ctx.moveTo(body.x + first.x - this.cameraX, body.y + first.y - this.cameraY);
-            for (let i = 1; i < body.vertices.length; i++) {
-                const v = body.vertices[i];
-                ctx.lineTo(body.x + v.x - this.cameraX, body.y + v.y - this.cameraY);
-            }
+            ctx.arc(body.x + body.radius - this.cameraX, body.y + body.radius - this.cameraY, body.radius, 0, Math.PI * 2);
             ctx.closePath();
-
             if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
                 ctx.save();
                 ctx.clip();
-                if (body.flipX) {
-                    ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
-                    ctx.scale(-1, 1);
-                    ctx.drawImage(
-                        this.images[body.imageName],
-                        -body.width / 2,
-                        -body.height / 2,
-                        body.width,
-                        body.height
-                    );
-                } else {
-                    ctx.drawImage(
-                        this.images[body.imageName],
-                        body.x - this.cameraX,
-                        body.y - this.cameraY,
-                        body.width,
-                        body.height
-                    );
-                }
+                ctx.drawImage(
+                    this.images[body.imageName],
+                    body.x - this.cameraX,
+                    body.y - this.cameraY,
+                    body.radius * 2,
+                    body.radius * 2
+                );
                 ctx.restore();
             } else {
                 ctx.fillStyle = color;
                 ctx.fill();
             }
-
             if (this.debugMode) {
                 ctx.strokeStyle = 'red';
                 ctx.stroke();
-                if (body.vertices && body.vertices.length > 0) {
-                    this.drawVertices(body);
+            }
+            ctx.restore();
+            return;
+        }
+        // --- 角度物理演算: 回転描画対応 ---
+        if (body.angle && body.angle !== 0) {
+            ctx.save();
+            ctx.translate(body.x + body.width / 2 - this.cameraX, body.y + body.height / 2 - this.cameraY);
+            ctx.rotate(body.angle);
+            const drawX = -body.width / 2;
+            const drawY = -body.height / 2;
+            if (body.collisionType === "polygon" && body.vertices && body.vertices.length >= 3) {
+                ctx.beginPath();
+                const first = body.vertices[0];
+                ctx.moveTo(first.x - body.width / 2, first.y - body.height / 2);
+                for (let i = 1; i < body.vertices.length; i++) {
+                    const v = body.vertices[i];
+                    ctx.lineTo(v.x - body.width / 2, v.y - body.height / 2);
+                }
+                ctx.closePath();
+
+                if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
+                    ctx.save();
+                    ctx.clip();
+                    if (body.flipX) {
+                        ctx.translate(body.width / 2, body.height / 2);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            -body.width / 2,
+                            -body.height / 2,
+                            body.width,
+                            body.height
+                        );
+                    } else {
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            drawX,
+                            drawY,
+                            body.width,
+                            body.height
+                        );
+                    }
+                    ctx.restore();
+                } else {
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                }
+
+                if (this.debugMode) {
+                    ctx.strokeStyle = 'red';
+                    ctx.stroke();
+                    if (body.vertices && body.vertices.length > 0) {
+                        ctx.fillStyle = 'lime';
+                        for (let i = 0; i < body.vertices.length; i++) {
+                            const v = body.vertices[i];
+                            ctx.beginPath();
+                            ctx.arc(v.x - body.width / 2, v.y - body.height / 2, 5, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
+                }
+            } else {
+                if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
+                    if (body.flipX) {
+                        ctx.save();
+                        ctx.translate(body.width / 2, body.height / 2);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            -body.width / 2,
+                            -body.height / 2,
+                            body.width,
+                            body.height
+                        );
+                        ctx.restore();
+                    } else {
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            drawX,
+                            drawY,
+                            body.width,
+                            body.height
+                        );
+                    }
+                } else {
+                    ctx.fillStyle = color;
+                    ctx.fillRect(drawX, drawY, body.width, body.height);
+                }
+                if (this.debugMode) {
+                    ctx.strokeStyle = 'red';
+                    ctx.strokeRect(drawX, drawY, body.width, body.height);
                 }
             }
             ctx.restore();
         } else {
-            if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
-                if (body.flipX) {
+            if (body.collisionType === "polygon" && body.vertices && body.vertices.length >= 3) {
+                ctx.save();
+                ctx.beginPath();
+                const worldVerts = this.getWorldVertices(body);
+                const first = worldVerts[0];
+                ctx.moveTo(first.x - this.cameraX, first.y - this.cameraY);
+                for (let i = 1; i < worldVerts.length; i++) {
+                    const v = worldVerts[i];
+                    ctx.lineTo(v.x - this.cameraX, v.y - this.cameraY);
+                }
+                ctx.closePath();
+
+                if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
                     ctx.save();
-                    ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
-                    ctx.scale(-1, 1);
-                    ctx.drawImage(
-                        this.images[body.imageName],
-                        -body.width / 2,
-                        -body.height / 2,
-                        body.width,
-                        body.height
-                    );
+                    ctx.clip();
+                    if (body.flipX) {
+                        ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            -body.width / 2,
+                            -body.height / 2,
+                            body.width,
+                            body.height
+                        );
+                    } else {
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            body.x - this.cameraX,
+                            body.y - this.cameraY,
+                            body.width,
+                            body.height
+                        );
+                    }
                     ctx.restore();
                 } else {
-                    this.drawImage(body.imageName, body.x, body.y, body.width, body.height);
+                    ctx.fillStyle = color;
+                    ctx.fill();
                 }
+
+                if (this.debugMode) {
+                    ctx.strokeStyle = 'red';
+                    ctx.stroke();
+                    if (body.vertices && body.vertices.length > 0) {
+                        this.drawVertices(body);
+                    }
+                }
+                ctx.restore();
             } else {
-                ctx.fillStyle = color;
-                ctx.fillRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
-            }
-            if (this.debugMode) {
-                ctx.strokeStyle = 'red';
-                ctx.strokeRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
-                if (body.vertices && body.vertices.length > 0) {
-                    this.drawVertices(body);
+                if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
+                    if (body.flipX) {
+                        ctx.save();
+                        ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
+                        ctx.scale(-1, 1);
+                        ctx.drawImage(
+                            this.images[body.imageName],
+                            -body.width / 2,
+                            -body.height / 2,
+                            body.width,
+                            body.height
+                        );
+                        ctx.restore();
+                    } else {
+                        this.drawImage(body.imageName, body.x, body.y, body.width, body.height);
+                    }
+                } else {
+                    ctx.fillStyle = color;
+                    ctx.fillRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
+                }
+                if (this.debugMode) {
+                    ctx.strokeStyle = 'red';
+                    ctx.strokeRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
+                    if (body.vertices && body.vertices.length > 0) {
+                        this.drawVertices(body);
+                    }
                 }
             }
         }
@@ -869,3 +1109,37 @@ class MouseText {
         ctx.restore();
     }
 }
+
+// Mouseオブジェクトの外側に追加（ファイル末尾などに）
+Mouse.createSlope = function (x, y, w, h, slope = 1, color = "gray") {
+    // slope: 0=水平, 1=右上がり, -1=左上がり
+    let vertices;
+    if (slope > 0) {
+        // 右上がり
+        vertices = [
+            { x: 0, y: h },
+            { x: w, y: 0 },
+            { x: w, y: h }
+        ];
+    } else if (slope < 0) {
+        // 左上がり
+        vertices = [
+            { x: 0, y: 0 },
+            { x: w, y: h },
+            { x: 0, y: h }
+        ];
+    } else {
+        // 水平
+        vertices = [
+            { x: 0, y: 0 },
+            { x: w, y: 0 },
+            { x: w, y: h },
+            { x: 0, y: h }
+        ];
+    }
+    const body = Mouse.createRigidBody(x, y, w, h, 0, 0, null, true, true);
+    body.vertices = vertices;
+    body.collisionType = "polygon";
+    body.color = color;
+    return body;
+};

@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <title>ネズミ2Dスクロールチュー</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
         body {
             margin: 0;
@@ -22,24 +23,58 @@
     <canvas id="gameCanvas"></canvas>
     <script src="mouse-engine.js"></script>
     <script>
-        Mouse.init("gameCanvas", window.innerWidth, window.innerHeight);
+        // ネズミエンジンの一部に追加チュー
+        Mouse.drawText = function (text, x, y, options = {}) {
+            this.ctx.save();
+
+            // オプションの反映（デフォルトは黒文字・16px）
+            this.ctx.font = options.font || "16px sans-serif";
+            this.ctx.fillStyle = options.color || "#000";
+            this.ctx.textAlign = options.align || "left";
+            this.ctx.textBaseline = options.baseline || "top";
+
+            // カメラ追従するか
+            if (options.camera !== false) {
+                x -= this.cameraX;
+                y -= this.cameraY;
+            }
+
+            this.ctx.fillText(text, x, y);
+
+            this.ctx.restore();
+        };
+
+        // ワールドサイズを指定（例: 横4000px, 縦600px）
+        Mouse.init("gameCanvas", window.innerWidth, window.innerHeight, 4000, 600);
         Mouse.setupUIEvents();
 
         // プレイヤー作成チュー
-        const player = Mouse.createRigidBody(100, 100, 40, 40, 0, 0, null, false, false);
+        Mouse.loadImage("player", "https://mouse-img.netlify.app/imgs/mouse-one.webp")
+        Mouse.loadImage("cheese", "https://mouse-img.netlify.app/imgs/cheese.webp")
+        const player = Mouse.createRigidBody(100, 100, 40, 40, 0, 0, "player", false, false);
         player.color = "#f55";
+        player.collisionType = "rect"; // "rect" または "polygon" に切り替え
         Mouse.followCamera(player);
 
         // 床作成チュー
         for (let i = 0; i < 20; i++) {
             Mouse.createRigidBody(i * 200, 500, 200, 50, 0, 0, null, false, true);
         }
+        const floor2 = Mouse.createRigidBody(200, 450, 200, 50, 0, 0, null, false, true);
+        const floor3 = Mouse.createRigidBody(400, 350, 200, 50, 0, 0, null, false, true);
+        for (i = 0; i < 1; i++) {
+            Mouse.createRigidBody(100, 80, 40, 40, 0, 0, "cheese", false, false);  // ← isStatic: false
+        }
+
+
 
         // 仮想パッドボタンチュー
         const leftBtn = {
-            x: 50, y: Mouse.height - 120, width: 60, height: 60,
+            x: 50, y: 0, width: 60, height: 60, // yは後で毎フレーム更新
+            holdMode: true,
+            pressed: false,
             draw(ctx) {
-                ctx.fillStyle = "#444";
+                ctx.fillStyle = this.pressed ? "#888" : "#444";
                 ctx.beginPath();
                 ctx.arc(this.x + 30, this.y + 30, 30, 0, Math.PI * 2);
                 ctx.fill();
@@ -47,14 +82,29 @@
                 ctx.font = "30px sans-serif";
                 ctx.fillText("←", this.x + 15, this.y + 40);
             },
-            onClick() { movingLeft = true; },
-            onRelease() { movingLeft = false; }
+            onClick() {
+                if (this.holdMode) {
+                    this.pressed = true;
+                    movingLeft = true;
+                } else {
+                    movingLeft = true;
+                    setTimeout(() => { movingLeft = false; }, 100);
+                }
+            },
+            onRelease() {
+                if (this.holdMode) {
+                    this.pressed = false;
+                    movingLeft = false;
+                }
+            }
         };
 
         const rightBtn = {
-            x: 140, y: Mouse.height - 120, width: 60, height: 60,
+            x: 140, y: 0, width: 60, height: 60, // yは後で毎フレーム更新
+            holdMode: true,
+            pressed: false,
             draw(ctx) {
-                ctx.fillStyle = "#444";
+                ctx.fillStyle = this.pressed ? "#888" : "#444";
                 ctx.beginPath();
                 ctx.arc(this.x + 30, this.y + 30, 30, 0, Math.PI * 2);
                 ctx.fill();
@@ -62,14 +112,29 @@
                 ctx.font = "30px sans-serif";
                 ctx.fillText("→", this.x + 15, this.y + 40);
             },
-            onClick() { movingRight = true; },
-            onRelease() { movingRight = false; }
+            onClick() {
+                if (this.holdMode) {
+                    this.pressed = true;
+                    movingRight = true;
+                } else {
+                    movingRight = true;
+                    setTimeout(() => { movingRight = false; }, 100);
+                }
+            },
+            onRelease() {
+                if (this.holdMode) {
+                    this.pressed = false;
+                    movingRight = false;
+                }
+            }
         };
 
         const jumpBtn = {
-            x: Mouse.width - 100, y: Mouse.height - 120, width: 60, height: 60,
+            x: 0, y: 0, width: 60, height: 60, // x,yは後で毎フレーム更新
+            holdMode: false,
+            pressed: false,
             draw(ctx) {
-                ctx.fillStyle = "#444";
+                ctx.fillStyle = this.pressed ? "#888" : "#444";
                 ctx.beginPath();
                 ctx.arc(this.x + 30, this.y + 30, 30, 0, Math.PI * 2);
                 ctx.fill();
@@ -78,8 +143,16 @@
                 ctx.fillText("Jump", this.x + 5, this.y + 40);
             },
             onClick() {
+                if (this.holdMode) {
+                    this.pressed = true;
+                }
                 if (player.onGround) {
                     player.vy = -12;
+                }
+            },
+            onRelease() {
+                if (this.holdMode) {
+                    this.pressed = false;
                 }
             }
         };
@@ -88,15 +161,133 @@
         Mouse.addUIElement(rightBtn);
         Mouse.addUIElement(jumpBtn);
 
+        // --- 編集ツールUI ---
+        let editMode = false;
+        let vertexEditMode = false;
+        let selectedBody = player; // 選択中のボディ
+
+        // ボディ選択用: 編集モード時にクリックで選択
+        Mouse.canvas.addEventListener('mousedown', function (e) {
+            if (!editMode) return;
+            const rect = Mouse.canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left + Mouse.cameraX;
+            const my = e.clientY - rect.top + Mouse.cameraY;
+            for (let body of Mouse.rigidBodies) {
+                if (
+                    mx >= body.x && mx <= body.x + body.width &&
+                    my >= body.y && my <= body.y + body.height
+                ) {
+                    selectedBody = body;
+                    break;
+                }
+            }
+        });
+
+        // 編集モード切替ボタン
+        const editBtn = {
+            x: 10, y: 10, width: 120, height: 36,
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = 0.8;
+                ctx.fillStyle = editMode ? "#f90" : "#444";
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = "#fff";
+                ctx.font = "18px sans-serif";
+                ctx.fillText(editMode ? "編集モード:ON" : "編集モード:OFF", this.x + 8, this.y + 24);
+                ctx.restore();
+            },
+            onClick() {
+                editMode = !editMode;
+                Mouse.debugMode = editMode;
+                if (editMode && vertexEditMode) {
+                    Mouse.setupVertexEditing();
+                }
+            }
+        };
+
+        // 当たり判定方式切替ボタン
+        const collisionBtn = {
+            x: 140, y: 10, width: 120, height: 36,
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = 0.8;
+                ctx.fillStyle = "#444";
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = "#fff";
+                ctx.font = "16px sans-serif";
+                ctx.fillText(
+                    "判定:" + (selectedBody.collisionType === "rect" ? "矩形" : "多角形"),
+                    this.x + 16, this.y + 24
+                );
+                ctx.restore();
+            },
+            onClick() {
+                if (selectedBody.collisionType === "rect") {
+                    selectedBody.collisionType = "polygon";
+                    // 頂点がなければ矩形の4頂点をセット
+                    if (!selectedBody.vertices || selectedBody.vertices.length < 3) {
+                        selectedBody.vertices = [
+                            { x: 0, y: 0 },
+                            { x: selectedBody.width, y: 0 },
+                            { x: selectedBody.width, y: selectedBody.height },
+                            { x: 0, y: selectedBody.height }
+                        ];
+                    }
+                } else {
+                    selectedBody.collisionType = "rect";
+                }
+            }
+        };
+
+        // 頂点編集ON/OFFボタン
+        const vertexBtn = {
+            x: 270, y: 10, width: 120, height: 36,
+            draw(ctx) {
+                ctx.save();
+                ctx.globalAlpha = 0.8;
+                ctx.fillStyle = vertexEditMode ? "#0a8" : "#444";
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = "#fff";
+                ctx.font = "16px sans-serif";
+                ctx.fillText(vertexEditMode ? "頂点編集:ON" : "頂点編集:OFF", this.x + 10, this.y + 24);
+                ctx.restore();
+            },
+            onClick() {
+                vertexEditMode = !vertexEditMode;
+                if (vertexEditMode) {
+                    Mouse.setupVertexEditing();
+                }
+            }
+        };
+
+        Mouse.addUIElement(editBtn);
+        Mouse.addUIElement(collisionBtn);
+        Mouse.addUIElement(vertexBtn);
+
         let movingLeft = false;
         let movingRight = false;
 
         Mouse.loop(() => {
+            // UIボタンの座標を毎フレーム更新
+            leftBtn.y = Mouse.height - 120;
+            rightBtn.y = Mouse.height - 120;
+            jumpBtn.x = Mouse.width - 100;
+            jumpBtn.y = Mouse.height - 120;
+
+            // ボタンのholdModeがtrueのものは押されている間だけmovingLeft/movingRightを維持
+            if (leftBtn.holdMode && !leftBtn.pressed) movingLeft = false;
+            if (rightBtn.holdMode && !rightBtn.pressed) movingRight = false;
+
             // 入力処理チュー
             if (Mouse.isKeyPressed("ArrowLeft") || movingLeft) {
                 player.vx = -5;
+                player.flipX = false; // 右向き
             } else if (Mouse.isKeyPressed("ArrowRight") || movingRight) {
                 player.vx = 5;
+                player.flipX = true; // 左向き
             } else {
                 player.vx = 0;
             }
@@ -105,15 +296,33 @@
                 player.vy = -12;
             }
 
+            // 編集モード時はデバッグ表示ON
+            Mouse.debugMode = editMode;
+
             // 描画チュー
             Mouse.clear();
             for (let body of Mouse.rigidBodies) {
                 Mouse.drawRigidBody(body, body.color || "blue");
             }
+            Mouse.drawRigidBody(floor2, floor2.color || "gray");
 
+            Mouse.drawText("ネズミエンジンβ🐀🐭🐁🐹🪤", 1000, 100, {
+                font: "24px sans-serif",
+                color: "#000",
+                camera: false,  // カメラ追従しないので固定表示になるチュー
+            });
             Mouse.drawUI();
-        });
 
+            // プレイヤー座標表示
+            Mouse.ctx.save();
+            Mouse.ctx.font = "20px monospace";
+            Mouse.ctx.fillStyle = "#222";
+            Mouse.ctx.fillText(
+                `Player: x=${player.x.toFixed(1)}, y=${player.y.toFixed(1)}`,
+                400, 30
+            );
+            Mouse.ctx.restore();
+        });
     </script>
 </body>
 

@@ -5,6 +5,8 @@ const Mouse = {
     images: {},
     width: 0,
     height: 0,
+    worldWidth: 0, // 追加
+    worldHeight: 0, // 追加
     rigidBodies: [],
     debugMode: false,
     uiElements: [],
@@ -15,11 +17,13 @@ const Mouse = {
     cameraTarget: null,
     cameraSmoothing: 0.1,
 
-    init(canvasId, width, height) {
+    init(canvasId, width, height, worldWidth = null, worldHeight = null) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
         this.width = this.canvas.width = width;
         this.height = this.canvas.height = height;
+        this.worldWidth = worldWidth || width;
+        this.worldHeight = worldHeight || height;
 
         window.addEventListener('keydown', e => this.keys[e.key] = true);
         window.addEventListener('keyup', e => this.keys[e.key] = false);
@@ -64,24 +68,434 @@ const Mouse = {
             body.vy += gravity;
             body.x += body.vx;
             body.y += body.vy;
+            body.onGround = false;
 
-            // 地面との当たり判定
-            if (body.y + body.height > this.height) {
-                body.y = this.height - body.height;
-                body.vy = 0;
-                body.onGround = true;
-            } else {
-                body.onGround = false;
+            // まず静的剛体との衝突を優先して分離
+            for (let sep = 0; sep < 5; sep++) {
+                let minMTV = null;
+                let minMTVLen = Infinity;
+                let minMTVFloor = null;
+
+                for (let floor of this.rigidBodies) {
+                    if (floor === body || !floor.isStatic) continue;
+                    // --- ここを修正 ---
+                    // 静的物体 or 動的物体（自分以外）との衝突を判定
+                    if (!floor.isStatic && !body.isStatic) {
+                        // 動的同士の衝突
+                        let hit = false;
+                        let mtv = null;
+                        // --- SAT/AABB判定（既存と同じ） ---
+                        if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
+                            floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = [
+                                { x: floor.x, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y + floor.height },
+                                { x: floor.x, y: floor.y + floor.height }
+                            ];
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = [
+                                { x: body.x, y: body.y },
+                                { x: body.x + body.width, y: body.y },
+                                { x: body.x + body.width, y: body.y + body.height },
+                                { x: body.x, y: body.y + body.height }
+                            ];
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else {
+                            // 通常のAABB
+                            hit =
+                                body.x < floor.x + floor.width &&
+                                body.x + body.width > floor.x &&
+                                body.y + body.height > floor.y &&
+                                body.y < floor.y + floor.height;
+                            if (hit) {
+                                // AABB MTV
+                                const dx1 = floor.x + floor.width - body.x;
+                                const dx2 = body.x + body.width - floor.x;
+                                const dy1 = floor.y + floor.height - body.y;
+                                const dy2 = body.y + body.height - floor.y;
+                                const minX = dx1 < dx2 ? dx1 : -dx2;
+                                const minY = dy1 < dy2 ? dy1 : -dy2;
+                                if (Math.abs(minX) < Math.abs(minY)) {
+                                    mtv = { x: minX, y: 0 };
+                                } else {
+                                    mtv = { x: 0, y: minY };
+                                }
+                            }
+                        }
+
+                        // 最小MTVを記録
+                        if (hit && mtv) {
+                            const len = Math.abs(mtv.x) + Math.abs(mtv.y);
+                            if (len < minMTVLen) {
+                                minMTVLen = len;
+                                minMTV = mtv;
+                                minMTVFloor = floor;
+                            }
+                        }
+                    } else if (floor.isStatic) {
+                        // 静的物体との衝突（既存処理）
+                        let hit = false;
+                        let mtv = null;
+
+                        // --- SAT判定とMTV計算 ---
+                        if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
+                            floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = [
+                                { x: floor.x, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y + floor.height },
+                                { x: floor.x, y: floor.y + floor.height }
+                            ];
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = [
+                                { x: body.x, y: body.y },
+                                { x: body.x + body.width, y: body.y },
+                                { x: body.x + body.width, y: body.y + body.height },
+                                { x: body.x, y: body.y + body.height }
+                            ];
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else {
+                            // 通常のAABB
+                            hit =
+                                body.x < floor.x + floor.width &&
+                                body.x + body.width > floor.x &&
+                                body.y + body.height > floor.y &&
+                                body.y < floor.y + floor.height;
+                            if (hit) {
+                                // AABB MTV
+                                const dx1 = floor.x + floor.width - body.x;
+                                const dx2 = body.x + body.width - floor.x;
+                                const dy1 = floor.y + floor.height - body.y;
+                                const dy2 = body.y + body.height - floor.y;
+                                const minX = dx1 < dx2 ? dx1 : -dx2;
+                                const minY = dy1 < dy2 ? dy1 : -dy2;
+                                if (Math.abs(minX) < Math.abs(minY)) {
+                                    mtv = { x: minX, y: 0 };
+                                } else {
+                                    mtv = { x: 0, y: minY };
+                                }
+                            }
+                        }
+
+                        // 最小MTVを記録
+                        if (hit && mtv) {
+                            const len = Math.abs(mtv.x) + Math.abs(mtv.y);
+                            if (len < minMTVLen) {
+                                minMTVLen = len;
+                                minMTV = mtv;
+                                minMTVFloor = floor;
+                            }
+                        }
+                    }
+                }
+
+                // 最小MTVで分離
+                if (minMTV) {
+                    if (Math.abs(minMTV.x) + Math.abs(minMTV.y) > 0.01) {
+                        body.x += minMTV.x;
+                        body.y += minMTV.y;
+                        // MTV方向への速度成分を除去
+                        const mtvLen = Math.hypot(minMTV.x, minMTV.y);
+                        if (mtvLen > 0) {
+                            const nx = minMTV.x / mtvLen;
+                            const ny = minMTV.y / mtvLen;
+                            const vDotN = body.vx * nx + body.vy * ny;
+                            if (vDotN > 0) {
+                                body.vx -= vDotN * nx;
+                                body.vy -= vDotN * ny;
+                            }
+                        }
+                        // 上から乗った場合のみonGround
+                        if (minMTV.y < -Math.abs(minMTV.x) && body.vy >= 0) {
+                            body.vy = 0;
+                            body.onGround = true;
+                        }
+                        // 横からの衝突ならvxを0、vyも微小なら0に
+                        if (Math.abs(minMTV.x) < Math.abs(minMTV.y)) {
+                            body.vx = 0;
+                            if (Math.abs(body.vy) < 1) body.vy = 0;
+                        }
+                        // 下からの衝突ならvyを0
+                        if (minMTV.y > 0.01 && body.vy < 0) {
+                            body.vy = 0;
+                        }
+                        // MTV方向に十分なオフセットで再貫通防止
+                        body.x += minMTV.x * 0.1;
+                        body.y += minMTV.y * 0.1;
+                    }
+                } else {
+                    break;
+                }
             }
 
-            // 壁の当たり判定
+            // 次に動的同士の押し合い
+            for (let sep = 0; sep < 1; sep++) {
+                let minMTV = null;
+                let minMTVLen = Infinity;
+                let minMTVFloor = null;
+
+                for (let floor of this.rigidBodies) {
+                    if (floor === body || floor.isStatic || body.isStatic) continue;
+                    // --- ここを修正 ---
+                    // 静的物体 or 動的物体（自分以外）との衝突を判定
+                    if (!floor.isStatic && !body.isStatic) {
+                        // 動的同士の衝突
+                        let hit = false;
+                        let mtv = null;
+                        // --- SAT/AABB判定（既存と同じ） ---
+                        if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
+                            floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = [
+                                { x: floor.x, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y + floor.height },
+                                { x: floor.x, y: floor.y + floor.height }
+                            ];
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = [
+                                { x: body.x, y: body.y },
+                                { x: body.x + body.width, y: body.y },
+                                { x: body.x + body.width, y: body.y + body.height },
+                                { x: body.x, y: body.y + body.height }
+                            ];
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else {
+                            // 通常のAABB
+                            hit =
+                                body.x < floor.x + floor.width &&
+                                body.x + body.width > floor.x &&
+                                body.y + body.height > floor.y &&
+                                body.y < floor.y + floor.height;
+                            if (hit) {
+                                // AABB MTV
+                                const dx1 = floor.x + floor.width - body.x;
+                                const dx2 = body.x + body.width - floor.x;
+                                const dy1 = floor.y + floor.height - body.y;
+                                const dy2 = body.y + body.height - floor.y;
+                                const minX = dx1 < dx2 ? dx1 : -dx2;
+                                const minY = dy1 < dy2 ? dy1 : -dy2;
+                                if (Math.abs(minX) < Math.abs(minY)) {
+                                    mtv = { x: minX, y: 0 };
+                                } else {
+                                    mtv = { x: 0, y: minY };
+                                }
+                            }
+                        }
+
+                        // 最小MTVを記録
+                        if (hit && mtv) {
+                            const len = Math.abs(mtv.x) + Math.abs(mtv.y);
+                            if (len < minMTVLen) {
+                                minMTVLen = len;
+                                minMTV = mtv;
+                                minMTVFloor = floor;
+                            }
+                        }
+                    } else if (floor.isStatic) {
+                        // 静的物体との衝突（既存処理）
+                        let hit = false;
+                        let mtv = null;
+
+                        // --- SAT判定とMTV計算 ---
+                        if (body.collisionType === "polygon" && body.vertices.length >= 3 &&
+                            floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (body.collisionType === "polygon" && body.vertices.length >= 3) {
+                            const polyA = body.vertices.map(v => ({ x: body.x + v.x, y: body.y + v.y }));
+                            const polyB = [
+                                { x: floor.x, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y },
+                                { x: floor.x + floor.width, y: floor.y + floor.height },
+                                { x: floor.x, y: floor.y + floor.height }
+                            ];
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else if (floor.collisionType === "polygon" && floor.vertices.length >= 3) {
+                            const polyA = [
+                                { x: body.x, y: body.y },
+                                { x: body.x + body.width, y: body.y },
+                                { x: body.x + body.width, y: body.y + body.height },
+                                { x: body.x, y: body.y + body.height }
+                            ];
+                            const polyB = floor.vertices.map(v => ({ x: floor.x + v.x, y: floor.y + v.y }));
+                            mtv = polygonsMTV(polyA, polyB);
+                            hit = !!mtv;
+                        } else {
+                            // 通常のAABB
+                            hit =
+                                body.x < floor.x + floor.width &&
+                                body.x + body.width > floor.x &&
+                                body.y + body.height > floor.y &&
+                                body.y < floor.y + floor.height;
+                            if (hit) {
+                                // AABB MTV
+                                const dx1 = floor.x + floor.width - body.x;
+                                const dx2 = body.x + body.width - floor.x;
+                                const dy1 = floor.y + floor.height - body.y;
+                                const dy2 = body.y + body.height - floor.y;
+                                const minX = dx1 < dx2 ? dx1 : -dx2;
+                                const minY = dy1 < dy2 ? dy1 : -dy2;
+                                if (Math.abs(minX) < Math.abs(minY)) {
+                                    mtv = { x: minX, y: 0 };
+                                } else {
+                                    mtv = { x: 0, y: minY };
+                                }
+                            }
+                        }
+
+                        // 最小MTVを記録
+                        if (hit && mtv) {
+                            const len = Math.abs(mtv.x) + Math.abs(mtv.y);
+                            if (len < minMTVLen) {
+                                minMTVLen = len;
+                                minMTV = mtv;
+                                minMTVFloor = floor;
+                            }
+                        }
+                    }
+                }
+
+                // 最小MTVで分離
+                if (minMTV) {
+                    if (Math.abs(minMTV.x) + Math.abs(minMTV.y) > 0.01) {
+                        // 動的同士のみ半分ずつ押し出す
+                        body.x += minMTV.x / 2;
+                        body.y += minMTV.y / 2;
+                        minMTVFloor.x -= minMTV.x / 2;
+                        minMTVFloor.y -= minMTV.y / 2;
+
+                        // 速度も半分ずつ反発
+                        const mtvLen = Math.hypot(minMTV.x, minMTV.y);
+                        if (mtvLen > 0) {
+                            const nx = minMTV.x / mtvLen;
+                            const ny = minMTV.y / mtvLen;
+                            const vDotN1 = body.vx * nx + body.vy * ny;
+                            const vDotN2 = minMTVFloor.vx * nx + minMTVFloor.vy * ny;
+                            const avg = (vDotN1 + vDotN2) / 2;
+                            body.vx -= (vDotN1 - avg) * nx;
+                            body.vy -= (vDotN1 - avg) * ny;
+                            minMTVFloor.vx -= (vDotN2 - avg) * nx;
+                            minMTVFloor.vy -= (vDotN2 - avg) * ny;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // 地面との当たり判定（ワールド下端）
+            if (body.y + body.height > this.worldHeight) {
+                body.y = this.worldHeight - body.height;
+                body.vy = 0;
+                body.onGround = true;
+            }
+
+            // 壁の当たり判定（ワールド端）
             if (body.x < 0) {
                 body.x = 0;
                 body.vx = 0;
-            } else if (body.x + body.width > this.width) {
-                body.x = this.width - body.width;
+            } else if (body.x + body.width > this.worldWidth) {
+                body.x = this.worldWidth - body.width;
                 body.vx = 0;
             }
+
+            // 摩擦（地面にいるときのみ適用）
+            if (body.onGround) {
+                body.vx *= 0.8;
+                if (Math.abs(body.vx) < 0.05) body.vx = 0;
+            }
+        }
+
+        // --- SAT: 多角形同士の交差判定とMTV計算 ---
+        function polygonsMTV(a, b) {
+            if (!a || !b || a.length < 3 || b.length < 3) return null;
+            let overlap = Infinity;
+            let smallestAxis = null;
+            let smallestAxisSign = 1;
+            const axes = [...getAxes(a), ...getAxes(b)];
+            for (const axis of axes) {
+                const projA = project(a, axis);
+                const projB = project(b, axis);
+                const o = Math.min(projA.max, projB.max) - Math.max(projA.min, projB.min);
+                if (o <= 0) return null; // 分離軸あり
+                if (o < overlap) {
+                    overlap = o;
+                    smallestAxis = axis;
+                    // MTV方向をfloor→bodyに修正
+                    const centerA = getCenter(a);
+                    const centerB = getCenter(b);
+                    const centerAtoB = { x: centerA.x - centerB.x, y: centerA.y - centerB.y };
+                    const centerAtoBdotAxis = centerAtoB.x * axis.x + centerAtoB.y * axis.y;
+                    smallestAxisSign = (centerAtoBdotAxis < 0) ? -1 : 1;
+                }
+            }
+            return {
+                x: smallestAxis.x * overlap * smallestAxisSign,
+                y: smallestAxis.y * overlap * smallestAxisSign
+            };
+        }
+        function getAxes(poly) {
+            const axes = [];
+            for (let i = 0; i < poly.length; i++) {
+                const p1 = poly[i];
+                const p2 = poly[(i + 1) % poly.length];
+                const edge = { x: p2.x - p1.x, y: p2.y - p1.y };
+                const normal = { x: -edge.y, y: edge.x };
+                const len = Math.hypot(normal.x, normal.y);
+                axes.push({ x: normal.x / len, y: normal.y / len });
+            }
+            return axes;
+        }
+        function project(poly, axis) {
+            let min = Infinity, max = -Infinity;
+            for (const p of poly) {
+                const proj = p.x * axis.x + p.y * axis.y;
+                if (proj < min) min = proj;
+                if (proj > max) max = proj;
+            }
+            return { min, max };
+        }
+        function getCenter(poly) {
+            let x = 0, y = 0;
+            for (const p of poly) {
+                x += p.x;
+                y += p.y;
+            }
+            return { x: x / poly.length, y: y / poly.length };
         }
     },
 
@@ -103,7 +517,8 @@ const Mouse = {
             vertices,
             imageName,
             isStatic,
-            onGround: false
+            onGround: false,
+            collisionType: useVertices ? "polygon" : "rect" // ← 追加
         };
 
         this.rigidBodies.push(body);
@@ -111,17 +526,89 @@ const Mouse = {
     },
 
     drawRigidBody(body, color = 'blue') {
-        if (body.imageName && this.images[body.imageName]) {
-            this.drawImage(body.imageName, body.x, body.y, body.width, body.height);
-        } else {
-            this.ctx.fillStyle = color;
-            this.ctx.fillRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
-        }
+        const ctx = this.ctx;
+        if (body.collisionType === "polygon" && body.vertices && body.vertices.length >= 3) {
+            // 多角形のパスを作成
+            ctx.save();
+            ctx.beginPath();
+            const first = body.vertices[0];
+            ctx.moveTo(body.x + first.x - this.cameraX, body.y + first.y - this.cameraY);
+            for (let i = 1; i < body.vertices.length; i++) {
+                const v = body.vertices[i];
+                ctx.lineTo(body.x + v.x - this.cameraX, body.y + v.y - this.cameraY);
+            }
+            ctx.closePath();
 
-        if (this.debugMode) {
-            this.ctx.strokeStyle = 'red';
-            this.ctx.strokeRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
-            this.drawVertices(body);
+            // 塗りつぶし
+            if (body.imageName && this.images[body.imageName]) {
+                ctx.save();
+                ctx.clip();
+                if (body.flipX) {
+                    // 画像反転＋多角形クリッピング
+                    ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(
+                        this.images[body.imageName],
+                        -body.width / 2,
+                        -body.height / 2,
+                        body.width,
+                        body.height
+                    );
+                } else {
+                    ctx.drawImage(
+                        this.images[body.imageName],
+                        body.x - this.cameraX,
+                        body.y - this.cameraY,
+                        body.width,
+                        body.height
+                    );
+                }
+                ctx.restore();
+            } else {
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+
+            // 輪郭
+            if (this.debugMode) {
+                ctx.strokeStyle = 'red';
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // 頂点
+            if (this.debugMode && body.vertices && body.vertices.length > 0) {
+                this.drawVertices(body);
+            }
+        } else {
+            // 通常の矩形
+            if (body.imageName && this.images[body.imageName]) {
+                if (body.flipX) {
+                    ctx.save();
+                    ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(
+                        this.images[body.imageName],
+                        -body.width / 2,
+                        -body.height / 2,
+                        body.width,
+                        body.height
+                    );
+                    ctx.restore();
+                } else {
+                    this.drawImage(body.imageName, body.x, body.y, body.width, body.height);
+                }
+            } else {
+                ctx.fillStyle = color;
+                ctx.fillRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
+            }
+            if (this.debugMode) {
+                ctx.strokeStyle = 'red';
+                ctx.strokeRect(body.x - this.cameraX, body.y - this.cameraY, body.width, body.height);
+                if (body.vertices && body.vertices.length > 0) {
+                    this.drawVertices(body);
+                }
+            }
         }
     },
 
@@ -232,7 +719,10 @@ const Mouse = {
     setupUIEvents() {
         this.canvas.addEventListener('mousedown', e => {
             const pos = this._getMousePos(e);
-            const uiEl = this.getUIElementAt(pos.x, pos.y);
+            // 画面座標に変換
+            const screenX = pos.x - this.cameraX;
+            const screenY = pos.y - this.cameraY;
+            const uiEl = this.getUIElementAt(screenX, screenY);
             if (uiEl && uiEl.onClick) {
                 uiEl.onClick(e);
             } else {
@@ -242,7 +732,9 @@ const Mouse = {
 
         this.canvas.addEventListener('mouseup', e => {
             const pos = this._getMousePos(e);
-            const uiEl = this.getUIElementAt(pos.x, pos.y);
+            const screenX = pos.x - this.cameraX;
+            const screenY = pos.y - this.cameraY;
+            const uiEl = this.getUIElementAt(screenX, screenY);
             if (uiEl && uiEl.onRelease) {
                 uiEl.onRelease(e);
             } else {
@@ -252,7 +744,9 @@ const Mouse = {
 
         this.canvas.addEventListener('mousemove', e => {
             const pos = this._getMousePos(e);
-            const uiEl = this.getUIElementAt(pos.x, pos.y);
+            const screenX = pos.x - this.cameraX;
+            const screenY = pos.y - this.cameraY;
+            const uiEl = this.getUIElementAt(screenX, screenY);
             if (uiEl && uiEl.onHover) {
                 uiEl.onHover(e);
             } else {
@@ -265,8 +759,8 @@ const Mouse = {
             e.preventDefault();
             const touch = e.touches[0];
             const rect = this.canvas.getBoundingClientRect();
-            const x = touch.clientX - rect.left + this.cameraX;
-            const y = touch.clientY - rect.top + this.cameraY;
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
             const uiEl = this.getUIElementAt(x, y);
             if (uiEl && uiEl.onClick) {
                 uiEl.onClick(e);
@@ -279,8 +773,8 @@ const Mouse = {
             e.preventDefault();
             const touch = e.touches[0];
             const rect = this.canvas.getBoundingClientRect();
-            const x = touch.clientX - rect.left + this.cameraX;
-            const y = touch.clientY - rect.top + this.cameraY;
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
             const uiEl = this.getUIElementAt(x, y);
             if (uiEl && uiEl.onHover) {
                 uiEl.onHover(e);
@@ -320,3 +814,21 @@ const Mouse = {
         this.ctx.setTransform(1, 0, 0, 1, -cam.x, -cam.y);
     }
 };
+// ステージテキスト用クラス
+class MouseText {
+    constructor(text, x, y, options = {}) {
+        this.text = text;
+        this.x = x;
+        this.y = y;
+        this.options = options;
+    }
+    draw(ctx, cameraX = 0, cameraY = 0) {
+        ctx.save();
+        ctx.font = this.options.font || "16px sans-serif";
+        ctx.fillStyle = this.options.color || "#000";
+        ctx.textAlign = this.options.align || "left";
+        ctx.textBaseline = this.options.baseline || "top";
+        ctx.fillText(this.text, this.x - cameraX, this.y - cameraY);
+        ctx.restore();
+    }
+}

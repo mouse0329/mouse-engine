@@ -17,6 +17,10 @@ const Mouse = {
     cameraTarget: null,
     cameraSmoothing: 0.1,
 
+    // --- シーン管理用プロパティ ---
+    scenes: {},
+    currentScene: null,
+
     init(canvasId, width, height, worldWidth = null, worldHeight = null) {
         this.canvas = document.getElementById(canvasId);
         this.ctx = this.canvas.getContext('2d');
@@ -50,11 +54,42 @@ const Mouse = {
         return !!this.keys[key];
     },
 
-    loop(callback) {
+    // シーンを登録
+    addScene(name, sceneObj) {
+        this.scenes[name] = sceneObj;
+    },
+
+    // シーンを切り替え
+    changeScene(name) {
+        if (this.scenes[name]) {
+            this.currentScene = this.scenes[name];
+            if (typeof this.currentScene.init === "function") {
+                this.currentScene.init();
+            }
+        }
+    },
+
+    loop(callback, targetFPS = 60) {
+        // FPS制御付きループ
+        let lastTime = performance.now();
+        const frameDuration = 1000 / targetFPS;
         const loopFunc = () => {
-            this.updateRigidBodies();
-            this.updateCamera(); // カメラ追従チュー
-            callback();
+            const now = performance.now();
+            if (now - lastTime >= frameDuration) {
+                lastTime = now;
+                this.updateRigidBodies();
+                this.updateCamera();
+                // --- シーンのupdate/drawを呼ぶ ---
+                if (this.currentScene) {
+                    if (typeof this.currentScene.update === "function") this.currentScene.update();
+                    this.clear();
+                    if (typeof this.currentScene.draw === "function") this.currentScene.draw();
+                    this.drawUI();
+                } else {
+                    // 旧来のコールバックもサポート
+                    callback && callback();
+                }
+            }
             requestAnimationFrame(loopFunc);
         };
         loopFunc();
@@ -62,22 +97,28 @@ const Mouse = {
 
     updateRigidBodies() {
         const gravity = 0.5;
-        for (let body of this.rigidBodies) {
-            if (body.isStatic) continue;
 
+        // 剛体を静的・動的で分割
+        const staticBodies = [];
+        const dynamicBodies = [];
+        for (let body of this.rigidBodies) {
+            if (body.isStatic) staticBodies.push(body);
+            else dynamicBodies.push(body);
+        }
+
+        for (let body of dynamicBodies) {
             body.vy += gravity;
             body.x += body.vx;
             body.y += body.vy;
             body.onGround = false;
 
-            // まず静的剛体との衝突を優先して分離
+            // 静的剛体との衝突のみ判定
             for (let sep = 0; sep < 5; sep++) {
                 let minMTV = null;
                 let minMTVLen = Infinity;
                 let minMTVFloor = null;
 
-                for (let floor of this.rigidBodies) {
-                    if (floor === body || !floor.isStatic) continue;
+                for (let floor of staticBodies) {
                     // --- ここを修正 ---
                     // 静的物体 or 動的物体（自分以外）との衝突を判定
                     if (!floor.isStatic && !body.isStatic) {
@@ -255,8 +296,8 @@ const Mouse = {
                 let minMTVLen = Infinity;
                 let minMTVFloor = null;
 
-                for (let floor of this.rigidBodies) {
-                    if (floor === body || floor.isStatic || body.isStatic) continue;
+                for (let floor of dynamicBodies) {
+                    if (floor === body) continue;
                     // --- ここを修正 ---
                     // 静的物体 or 動的物体（自分以外）との衝突を判定
                     if (!floor.isStatic && !body.isStatic) {
@@ -526,9 +567,9 @@ const Mouse = {
     },
 
     drawRigidBody(body, color = 'blue') {
+        // デバッグモードでなければ頂点描画や輪郭描画を省略
         const ctx = this.ctx;
         if (body.collisionType === "polygon" && body.vertices && body.vertices.length >= 3) {
-            // 多角形のパスを作成
             ctx.save();
             ctx.beginPath();
             const first = body.vertices[0];
@@ -539,12 +580,10 @@ const Mouse = {
             }
             ctx.closePath();
 
-            // 塗りつぶし
-            if (body.imageName && this.images[body.imageName]) {
+            if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
                 ctx.save();
                 ctx.clip();
                 if (body.flipX) {
-                    // 画像反転＋多角形クリッピング
                     ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
                     ctx.scale(-1, 1);
                     ctx.drawImage(
@@ -569,20 +608,16 @@ const Mouse = {
                 ctx.fill();
             }
 
-            // 輪郭
             if (this.debugMode) {
                 ctx.strokeStyle = 'red';
                 ctx.stroke();
+                if (body.vertices && body.vertices.length > 0) {
+                    this.drawVertices(body);
+                }
             }
             ctx.restore();
-
-            // 頂点
-            if (this.debugMode && body.vertices && body.vertices.length > 0) {
-                this.drawVertices(body);
-            }
         } else {
-            // 通常の矩形
-            if (body.imageName && this.images[body.imageName]) {
+            if (body.imageName && this.images[body.imageName] && this.images[body.imageName].complete) {
                 if (body.flipX) {
                     ctx.save();
                     ctx.translate(body.x - this.cameraX + body.width / 2, body.y - this.cameraY + body.height / 2);
@@ -614,8 +649,10 @@ const Mouse = {
 
     drawVertices(body, pointColor = 'lime', radius = 5) {
         if (!this.debugMode || !body.vertices || body.vertices.length === 0) return;
+        // ループ外でfillStyleをセット
         this.ctx.fillStyle = pointColor;
-        for (let v of body.vertices) {
+        for (let i = 0, len = body.vertices.length; i < len; i++) {
+            const v = body.vertices[i];
             this.ctx.beginPath();
             this.ctx.arc(body.x + v.x - this.cameraX, body.y + v.y - this.cameraY, radius, 0, Math.PI * 2);
             this.ctx.fill();

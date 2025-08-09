@@ -107,6 +107,24 @@ const Mouse = {
         }
 
         for (let body of dynamicBodies) {
+            // --- トリガー剛体は物理演算・衝突解決をスキップ ---
+            if (body.isTrigger) {
+                // 他の剛体との重なりを検出
+                for (let other of this.rigidBodies) {
+                    if (other === body) continue;
+                    // AABB簡易判定（必要ならpolygon/circle対応も可）
+                    let hit =
+                        body.x < other.x + other.width &&
+                        body.x + body.width > other.x &&
+                        body.y < other.y + other.height &&
+                        body.y + body.height > other.y;
+                    if (hit && body.onTrigger) {
+                        body.onTrigger(other);
+                    }
+                }
+                continue; // 物理演算・衝突解決しない
+            }
+
             body.vy += gravity;
             body.x += body.vx;
             body.y += body.vy;
@@ -664,7 +682,9 @@ const Mouse = {
             angularAcceleration: options.angularAcceleration !== undefined ? options.angularAcceleration : 0,
             inertia: options.inertia !== undefined ? options.inertia : (width * height * 0.1),
             enableAnglePhysics: !!options.enableAnglePhysics,
-            radius: options.collisionType === "circle" || options.radius ? radius : undefined
+            radius: options.collisionType === "circle" || options.radius ? radius : undefined,
+            isTrigger: !!options.isTrigger, // ★トリガー判定用
+            onTrigger: typeof options.onTrigger === "function" ? options.onTrigger : null // ★トリガーコールバック
         };
 
         this.rigidBodies.push(body);
@@ -1143,3 +1163,181 @@ Mouse.createSlope = function (x, y, w, h, slope = 1, color = "gray") {
     body.color = color;
     return body;
 };
+
+// --- スライダーUIクラス ---
+class MouseSlider {
+    constructor(x, y, width, min, max, value, options = {}) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = options.height || 24;
+        this.min = min;
+        this.max = max;
+        this.value = value;
+        this.onChange = options.onChange || null;
+        this.dragging = false;
+        this.thumbRadius = options.thumbRadius || 10;
+        this.barColor = options.barColor || "#888";
+        this.thumbColor = options.thumbColor || "#c00";
+        this.bgColor = options.bgColor || "#eee";
+        this.label = options.label || "";
+    }
+
+    draw(ctx) {
+        // バー
+        ctx.save();
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = this.barColor;
+        ctx.fillStyle = this.bgColor;
+        ctx.fillRect(this.x, this.y + this.height / 2 - 6, this.width, 12);
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y + this.height / 2);
+        ctx.lineTo(this.x + this.width, this.y + this.height / 2);
+        ctx.stroke();
+
+        // サム
+        const t = (this.value - this.min) / (this.max - this.min);
+        const thumbX = this.x + t * this.width;
+        ctx.beginPath();
+        ctx.arc(thumbX, this.y + this.height / 2, this.thumbRadius, 0, Math.PI * 2);
+        ctx.fillStyle = this.thumbColor;
+        ctx.fill();
+        ctx.strokeStyle = "#333";
+        ctx.stroke();
+
+        // ラベル・値
+        ctx.font = "14px sans-serif";
+        ctx.fillStyle = "#222";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        if (this.label) {
+            ctx.fillText(this.label, this.x, this.y - 2);
+        }
+        ctx.textAlign = "right";
+        ctx.fillText(this.value.toFixed(2), this.x + this.width, this.y - 2);
+
+        ctx.restore();
+    }
+
+    // UIイベント用
+    onClick(e) {
+        this._updateValueFromEvent(e);
+        this.dragging = true;
+    }
+    onRelease(e) {
+        this.dragging = false;
+    }
+    onHover(e) {
+        if (this.dragging) {
+            this._updateValueFromEvent(e);
+        }
+    }
+    _updateValueFromEvent(e) {
+        // e.offsetX/Yが使えない場合はclientXからcanvas座標を計算
+        let rect = Mouse.canvas.getBoundingClientRect();
+        let x = (e.offsetX !== undefined) ? e.offsetX : (e.clientX - rect.left);
+        let relX = Math.max(this.x, Math.min(this.x + this.width, x));
+        let t = (relX - this.x) / this.width;
+        let newValue = this.min + t * (this.max - this.min);
+        this.value = Math.max(this.min, Math.min(this.max, newValue));
+        if (this.onChange) this.onChange(this.value);
+    }
+}
+
+// --- テキスト入力UIクラス ---
+class MouseTextInput {
+    constructor(x, y, width, options = {}) {
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = options.height || 32;
+        this.value = options.value || "";
+        this.placeholder = options.placeholder || "";
+        this.onChange = options.onChange || null;
+        this.focused = false;
+        this.maxLength = options.maxLength || 64;
+        this.font = options.font || "18px sans-serif";
+        this.bgColor = options.bgColor || "#fff";
+        this.borderColor = options.borderColor || "#888";
+        this.textColor = options.textColor || "#222";
+        this.placeholderColor = options.placeholderColor || "#aaa";
+        this.cursorColor = options.cursorColor || "#222";
+        this._cursorVisible = true;
+        this._lastBlink = Date.now();
+    }
+
+    draw(ctx) {
+        ctx.save();
+        // 背景
+        ctx.fillStyle = this.bgColor;
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+        // 枠
+        ctx.strokeStyle = this.focused ? "#0af" : this.borderColor;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(this.x, this.y, this.width, this.height);
+
+        // テキスト
+        ctx.font = this.font;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = this.value ? this.textColor : this.placeholderColor;
+        const text = this.value ? this.value : this.placeholder;
+        ctx.fillText(text, this.x + 8, this.y + this.height / 2);
+
+        // カーソル
+        if (this.focused) {
+            const now = Date.now();
+            if (now - this._lastBlink > 500) {
+                this._cursorVisible = !this._cursorVisible;
+                this._lastBlink = now;
+            }
+            if (this._cursorVisible) {
+                const textWidth = ctx.measureText(this.value).width;
+                ctx.beginPath();
+                ctx.strokeStyle = this.cursorColor;
+                ctx.moveTo(this.x + 8 + textWidth, this.y + 6);
+                ctx.lineTo(this.x + 8 + textWidth, this.y + this.height - 6);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
+
+    // UIイベント用
+    onClick(e) {
+        this.focused = true;
+        // 他のテキスト入力欄のフォーカス解除
+        for (const el of Mouse.uiElements) {
+            if (el !== this && el instanceof MouseTextInput) el.focused = false;
+        }
+    }
+    onRelease(e) { }
+    onHover(e) { }
+
+    // キーボード入力
+    handleKey(e) {
+        if (!this.focused) return;
+        if (e.key === "Backspace") {
+            if (this.value.length > 0) {
+                this.value = this.value.slice(0, -1);
+                if (this.onChange) this.onChange(this.value);
+            }
+        } else if (e.key === "Enter") {
+            this.focused = false;
+        } else if (e.key.length === 1 && this.value.length < this.maxLength) {
+            this.value += e.key;
+            if (this.onChange) this.onChange(this.value);
+        }
+        e.preventDefault();
+    }
+}
+
+// --- テキスト入力欄のキーボードイベントをグローバルで処理 ---
+window.addEventListener("keydown", function (e) {
+    for (const el of Mouse.uiElements) {
+        if (el instanceof MouseTextInput && el.focused) {
+            el.handleKey(e);
+            break;
+        }
+    }
+});

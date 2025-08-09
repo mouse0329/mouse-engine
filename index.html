@@ -273,10 +273,15 @@
             }
         };
 
+        const slider = new MouseSlider(50, 50, 200, 0, 19199, 50, {
+            label: "ボリューム",
+            onChange: v => console.log("値:", v)
+        });
         Mouse.addUIElement(editBtn);
         Mouse.addUIElement(collisionBtn);
         Mouse.addUIElement(vertexBtn);
 
+        Mouse.addUIElement(slider);
         let movingLeft = false;
         let movingRight = false;
 
@@ -321,6 +326,7 @@
                 color: "#000",
                 camera: false,  // カメラ追従しないので固定表示になるチュー
             });
+
             Mouse.drawUI();
 
             // プレイヤー座標表示

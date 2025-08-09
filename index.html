@@ -15,6 +15,8 @@
         canvas {
             display: block;
             background: #cce;
+            cursor: text;
+            /* テキスト入力時のIビームカーソルにしたいなら */
         }
     </style>
 </head>
@@ -66,6 +68,11 @@
         // --- ここで坂床を追加 ---
         Mouse.createSlope(700, 450, 200, 50, 1, "#888"); // 右上がり坂
         Mouse.createSlope(950, 450, 200, 50, -1, "#888"); // 左上がり坂
+        const textInput = new MouseTextInput(20, 500, 300, {
+            placeholder: "ここに日本語入力できるチュー！"
+        });
+        Mouse.uiElements.push(textInput);
+
 
         for (i = 0; i < 1; i++) {
             Mouse.createRigidBody(100, 80, 40, 40, 0, 0, "cheese", false, false, {

@@ -343,7 +343,7 @@ const Mouse = {
             }
 
             // 次に動的同士の押し合い
-            for (let sep = 0; sep < 1; sep++) {
+            for (let sep = 0; sep < 5; sep++) {
                 let minMTV = null;
                 let minMTVLen = Infinity;
                 let minMTVFloor = null;
@@ -1277,6 +1277,7 @@ class MouseTextInput {
         this.value = options.value || "";
         this.placeholder = options.placeholder || "";
         this.onChange = options.onChange || null;
+
         this.focused = false;
         this.maxLength = options.maxLength || 64;
         this.font = options.font || "18px sans-serif";
@@ -1285,8 +1286,39 @@ class MouseTextInput {
         this.textColor = options.textColor || "#222";
         this.placeholderColor = options.placeholderColor || "#aaa";
         this.cursorColor = options.cursorColor || "#222";
+
         this._cursorVisible = true;
         this._lastBlink = Date.now();
+        this.scrollOffset = 0;
+
+        // 実際のテキスト入力用の隠しinputを作るチュー
+        this._createHiddenInput();
+    }
+
+    _createHiddenInput() {
+        this.hiddenInput = document.createElement("input");
+        this.hiddenInput.type = "text";
+        this.hiddenInput.style.position = "absolute";
+        this.hiddenInput.style.opacity = "0";  // 完全に見えなくするチュー
+        this.hiddenInput.style.left = `${this.x}px`;
+        this.hiddenInput.style.top = `${this.y}px`;
+        this.hiddenInput.style.width = `${this.width}px`;
+        this.hiddenInput.style.height = `${this.height}px`;
+        this.hiddenInput.maxLength = this.maxLength;
+        this.hiddenInput.autocomplete = "off";
+        this.hiddenInput.spellcheck = false;
+        document.body.appendChild(this.hiddenInput);
+
+        // inputイベントで値を同期
+        this.hiddenInput.addEventListener("input", (e) => {
+            this.value = this.hiddenInput.value;
+            if (this.onChange) this.onChange(this.value);
+        });
+
+        // blur時にフォーカス外す
+        this.hiddenInput.addEventListener("blur", (e) => {
+            this.focused = false;
+        });
     }
 
     draw(ctx) {
@@ -1294,20 +1326,40 @@ class MouseTextInput {
         // 背景
         ctx.fillStyle = this.bgColor;
         ctx.fillRect(this.x, this.y, this.width, this.height);
-        // 枠
+
+        // 枠線
         ctx.strokeStyle = this.focused ? "#0af" : this.borderColor;
         ctx.lineWidth = 2;
         ctx.strokeRect(this.x, this.y, this.width, this.height);
 
-        // テキスト
         ctx.font = this.font;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillStyle = this.value ? this.textColor : this.placeholderColor;
-        const text = this.value ? this.value : this.placeholder;
-        ctx.fillText(text, this.x + 8, this.y + this.height / 2);
 
-        // カーソル
+        // テキスト幅とスクロール計算
+        const textWidth = ctx.measureText(this.value).width;
+        const availableWidth = this.width - 16; // 余白
+
+        if (textWidth > availableWidth) {
+            this.scrollOffset = textWidth - availableWidth;
+        } else {
+            this.scrollOffset = 0;
+        }
+
+        // クリップしてスクロール対応
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(this.x + 8, this.y + 4, availableWidth, this.height - 8);
+        ctx.clip();
+
+        // テキスト or プレースホルダー
+        ctx.fillStyle = this.value ? this.textColor : this.placeholderColor;
+        const textToDraw = this.value || this.placeholder;
+        ctx.fillText(textToDraw, this.x + 8 - this.scrollOffset, this.y + this.height / 2);
+
+        ctx.restore();
+
+        // カーソル点滅（フォーカス時のみ）
         if (this.focused) {
             const now = Date.now();
             if (now - this._lastBlink > 500) {
@@ -1315,45 +1367,42 @@ class MouseTextInput {
                 this._lastBlink = now;
             }
             if (this._cursorVisible) {
-                const textWidth = ctx.measureText(this.value).width;
                 ctx.beginPath();
                 ctx.strokeStyle = this.cursorColor;
-                ctx.moveTo(this.x + 8 + textWidth, this.y + 6);
-                ctx.lineTo(this.x + 8 + textWidth, this.y + this.height - 6);
+                ctx.moveTo(this.x + 8 + textWidth - this.scrollOffset, this.y + 6);
+                ctx.lineTo(this.x + 8 + textWidth - this.scrollOffset, this.y + this.height - 6);
                 ctx.stroke();
             }
         }
         ctx.restore();
     }
 
-    // UIイベント用
     onClick(e) {
-        this.focused = true;
-        // 他のテキスト入力欄のフォーカス解除
-        for (const el of Mouse.uiElements) {
-            if (el !== this && el instanceof MouseTextInput) el.focused = false;
-        }
-    }
-    onRelease(e) { }
-    onHover(e) { }
+        // クリック判定
+        if (
+            e.offsetX >= this.x && e.offsetX <= this.x + this.width &&
+            e.offsetY >= this.y && e.offsetY <= this.y + this.height
+        ) {
+            this.focused = true;
 
-    // キーボード入力
-    handleKey(e) {
-        if (!this.focused) return;
-        if (e.key === "Backspace") {
-            if (this.value.length > 0) {
-                this.value = this.value.slice(0, -1);
-                if (this.onChange) this.onChange(this.value);
+            // 他の入力欄のフォーカス解除
+            for (const el of Mouse.uiElements) {
+                if (el !== this && el instanceof MouseTextInput) el.focused = false;
             }
-        } else if (e.key === "Enter") {
+
+            // hiddenInputにフォーカスを移すチュー
+            this.hiddenInput.focus();
+
+            // hiddenInputの位置も更新（必要に応じて）
+            this.hiddenInput.style.left = `${this.x}px`;
+            this.hiddenInput.style.top = `${this.y}px`;
+        } else {
             this.focused = false;
-        } else if (e.key.length === 1 && this.value.length < this.maxLength) {
-            this.value += e.key;
-            if (this.onChange) this.onChange(this.value);
+            this.hiddenInput.blur();
         }
-        e.preventDefault();
     }
 }
+
 
 // --- テキスト入力欄のキーボードイベントをグローバルで処理 ---
 window.addEventListener("keydown", function (e) {

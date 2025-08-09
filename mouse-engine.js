@@ -70,23 +70,36 @@ const Mouse = {
     },
 
     loop(callback, targetFPS = 60) {
-        // FPS制御付きループ
         let lastTime = performance.now();
         const frameDuration = 1000 / targetFPS;
+
+        let frames = 0;
+        let fps = 0;
+        let fpsLastTime = performance.now();
+
         const loopFunc = () => {
             const now = performance.now();
+
+            // FPS計測用
+            frames++;
+            if (now - fpsLastTime >= 1000) { // 1秒経ったら
+                fps = frames;
+                frames = 0;
+                fpsLastTime = now;
+                console.log(`FPS: ${fps}`); // ここでFPS表示チュー
+            }
+
             if (now - lastTime >= frameDuration) {
                 lastTime = now;
                 this.updateRigidBodies();
                 this.updateCamera();
-                // --- シーンのupdate/drawを呼ぶ ---
+
                 if (this.currentScene) {
                     if (typeof this.currentScene.update === "function") this.currentScene.update();
                     this.clear();
                     if (typeof this.currentScene.draw === "function") this.currentScene.draw();
                     this.drawUI();
                 } else {
-                    // 旧来のコールバックもサポート
                     callback && callback();
                 }
             }
@@ -95,10 +108,10 @@ const Mouse = {
         loopFunc();
     },
 
+
     updateRigidBodies() {
         const gravity = 0.5;
 
-        // 剛体を静的・動的で分割
         const staticBodies = [];
         const dynamicBodies = [];
         for (let body of this.rigidBodies) {
@@ -109,20 +122,22 @@ const Mouse = {
         for (let body of dynamicBodies) {
             // --- トリガー剛体は物理演算・衝突解決をスキップ ---
             if (body.isTrigger) {
-                // 他の剛体との重なりを検出
                 for (let other of this.rigidBodies) {
                     if (other === body) continue;
-                    // AABB簡易判定（必要ならpolygon/circle対応も可）
+
+                    // AABB判定（必要なら円形・ポリゴン対応も追加）
                     let hit =
                         body.x < other.x + other.width &&
                         body.x + body.width > other.x &&
                         body.y < other.y + other.height &&
                         body.y + body.height > other.y;
-                    if (hit && body.onTrigger) {
-                        body.onTrigger(other);
+
+                    if (hit) {
+                        if (body.onTrigger) body.onTrigger(other);
+                        if (other.isTrigger && other.onTrigger) other.onTrigger(body);
                     }
                 }
-                continue; // 物理演算・衝突解決しない
+                continue; // 物理演算はスキップ
             }
 
             body.vy += gravity;
@@ -690,6 +705,14 @@ const Mouse = {
         this.rigidBodies.push(body);
         return body;
     },
+
+    removeRigidBody(body) {
+        const index = this.rigidBodies.indexOf(body);
+        if (index !== -1) {
+            this.rigidBodies.splice(index, 1);
+        }
+    },
+
 
     // --- 頂点をワールド座標に回転して返す ---
     getWorldVertices(body) {
